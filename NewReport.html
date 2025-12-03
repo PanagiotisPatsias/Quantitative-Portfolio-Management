@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Investment Strategy Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f9f9f9;
+            line-height: 1.6;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        .section {
+            margin-bottom: 40px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .code {
+            background-color: #f4f4f4;
+            padding: 10px;
+            border-left: 5px solid #2c3e50;
+            font-family: monospace;
+        }
+        img {
+            max-width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+<script id="MathJax-script" async
+        src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+</script>
+
+
+
+    <h1>Investment Strategy Report</h1>
+    <p>Panagiotis Patsias, 23-720-394, panagiotis.patsias@uzh.ch</p>
+
+<p>Liam Kane, 19-734-862, liam.kane@uzh.ch</p>
+
+<p>Tim Vorburger, 20-703-302, tim.vorburger@uzh.ch</p>
+
+<p>Christopher Narayanan, 21-730-916, christopher.narayanan@uzh.ch</p>
+
+    <div class="section">
+        <h2>High-Level Strategy Overview</h2>
+        <p>
+            Our investment strategy combines the Black-Litterman model with mean-variance optimization. The Black-Litterman model enhances return estimates by integrating investor views with market equilibrium assumptions. This addresses key criticisms of the traditional Markowitz framework, such as unreliable inputs and sensitivity to assumptions.
+        </p>
+        <p>
+            The mean-variance optimization is then used to construct efficient portfolios that aim to maximize expected return and minimize the level of risk. By blending these two methodologies, we aim to derive more stable and realistic portfolios.
+        </p>
+    </div>
+
+    <div class="section">
+        <h2>Backtesting Methodology</h2>
+        <h3>Data Preprocessing</h3>
+        <p>
+            Before using any filters, constraints, or models, we cleaned and prepared the data. First, we gave each stock a sector by finding the first available label for that stock. These labels were numbers, so we replaced them with the correct sector names (like "Energy" or "Tech").
+            For the machine learning part, we aligned the jkp_data with the market data. Since the dates didn’t always match, we mapped each date from the jkp_data to the closest future date in the market data. Then, we calculated the next-period returns for each stock and ranked them from lowest to highest. These ranks were normalized to a 0–100 scale and used as training labels for our Learning to Rank (LTR) model.
+        </p>
+        <h3>Black-Litterman Model</h3>
+<p>
+    In our setup, asset returns are assumed to follow a multivariate normal distribution, where returns <strong> r </strong> are drawn from a distribution with mean <strong>mu</strong> and covariance <strong>σ</strong>:  
+    <strong>r ~ N(mu, σ)</strong>.
+</p>
+
+<p>
+    We start with market capitalization weights (<strong>w_cap</strong>) and apply reverse optimization to estimate the implied equilibrium returns. The formula used is:
+</p>
+<p><strong>Equation:</strong></p>
+<p>
+    $$
+    m = λ * σ * w_cap
+    $$
+</p>
+<p>
+    This step reflects the belief that markets are in equilibrium, and gives us a prior estimate of expected returns.
+</p>
+
+<p>
+    Later in the model, the covariance matrix is scaled to form the prior uncertainty:
+    <p><strong>Equation:</strong></p>
+        <p>$$
+            Ψ = τΨ * σ
+           $$ 
+        </p> 
+    This scaling is used in the Bayesian update step.
+</p>
+
+<p>
+    Views are encoded using matrices <strong>P</strong> and <strong>q</strong>, and the uncertainty around those views is captured using <strong>Ω</strong>. In our case, we set 
+    <strong>Ψ= 0.01</strong> and <strong>Ω = 0.0001</strong>, meaning we place higher confidence in the market equilibrium than in our views.
+</p>
+        <h3>Learning to Rank (LTR)</h3>
+        <p>
+        We also decided to implement a machine learning model to support the input generation process. Specifically, we used a Learning-to-Rank (LTR) approach to rank the different assets and inform the view matrix in the Black-Litterman model. For the implementation, we used XGBoost with the pairwise ranking objective instead of <strong>rank:ndcg</strong>, because our goal was to capture the full relative order of the assets, not just to identify the top-ranked ones.
+
+        </p>
+
+        <h3>Mean-Variance Optimization</h3>
+        <p>
+            The mean-variance framework is applied to allocate weights that minimize portfolio variance for a target return. This classic method complements Black-Litterman by handling risk-return tradeoffs effectively.
+        </p>
+
+        <p><strong>Equation:</strong></p>
+        <p>
+        $$
+        \min_{w} \left( -\mu_{\text{posterior}}^\top w + \lambda w^\top \Sigma w \right)
+        $$
+        </p>
+
+        <p>
+        Where:<br>
+        &emsp;\( w \): Portfolio weights<br>
+        &emsp;\( \mu_{\text{posterior}} \): Posterior expected returns (from Black-Litterman)<br>
+        &emsp;\( \Sigma \): Covariance matrix of returns<br>
+        &emsp;\( \lambda \): Risk aversion coefficient
+        </p>
+
+
+    <div class="section">
+        <h2>Filters</h2>
+        <ul>
+            <li><strong>Minimum Volume:</strong> Ensures liquidity by excluding illiquid assets.</li>
+            <li><strong>Gaps:</strong> Filters assets by checking for long gaps (consecutive zeros) in their volume history, and excludes those with gaps longer than n_days before a given rebalance date.</li>
+            <li><strong>Ltr:</strong> Picks all the stocks that are available on a specific date and marks them as selected.</li>
+            <li><strong>Minimum Market Cap & Volatility Filter:</strong> Avoids small-cap or highly volatile assets.</li>
+        </ul>
+        <h2>
+            Optimization constraints included:
+        </h2>
+        <ul>
+            <li><strong>Return Series:</strong> 3-year historical data for expected return and risk estimation.</li>
+            <li><strong>Budget Constraint:</strong> Ensures full capital deployment.</li>
+            <li><strong>Box Constraints:</strong> No asset can exceed 10% allocation.</li>
+            <li><strong>Size-Dependent Bounds:</strong> Stricter caps on small stocks.</li>
+            <li><strong>Cap Weights:</strong> Used for equilibrium reference.</li>
+            <li><strong>Turnover Constraint:</strong> Limits portfolio churn to control transaction costs.</li>
+            <li><strong>Sector Exposure Constraints:</strong> This sets a rule for the optimization to limit how much the portfolio can invest in each sector, capping each one (like Financials, Energy, Tech, etc.) at 20% of the total portfolio.</li>
+            <li><strong>Scores ltr:</strong> This sets up a machine learning model that learns to rank stocks based on past data, using XGBoost, so the optimizer can prioritize higher-ranked stocks in portfolio construction.</li>
+        </ul>
+        <p>
+            We also implemented the <strong>Factor Exposure Constraints</strong> but they were not used in the final strategy, as they did not improve performance. However, the functions remain available in the file <code>backtest_item_builder_functions.py</code>.
+        </p>
+        </ul>
+        <li><strong>Factor Exposure Constraints:</strong>This function adds constraints to the optimization to limit how much exposure the portfolio can have to certain risk factors, like value, momentum, or size.
+        </ul>
+
+        <h3>Other Machine Learning Approaches (Not Used) </h3>
+        <p>We also explored forecasting expected returns using an <strong>Ordinary Least Squares (OLS)</strong> regression model based on selected factor exposures. Factors were chosen using the following criteria: </p> <ul> <li>Low percentage of missing values</li> <li>Low multicollinearity</li> </ul> <p> However, we decided not to use the OLS model. The data from <strong>jkp_data</strong> gave poor performance. Instead, we found that incorporating Learning-to-Rank (LTR) scores into the Black-Litterman framework provided more reliable guidance for forming our views. Nevertheless, the OLS function remains implemented in <code>backtest_item_builder_functions.py</code>. </p>
+
+    <div class="section">
+        <h2>Backtesting Results</h2>
+
+        <h3>Performance Charts</h3>
+        <p>Below are visual summaries of strategy performance:</p>
+        <ul>
+            <li>Cumulative Returns</li>
+            <li>Rolling 3-year returns</li>
+            <li>Rolling 1-Year Sharpe Ratio</li>
+            <li>Rolling 1-Year Volatility</li>
+            <li>Drawdown plots</li>
+            <li>Cumulative Return During Bull Markets</li>
+            <li>Cumulative Return During Bear Markets</li>
+            <li>Turnover</li>
+        </ul>
+        <!-- Insert chart images or interactive visualizations -->
+        <img src="cumulative_returns.png" alt="Cumulative Returns">
+        <p>
+            Throughout the period from 2016 to 2024, both Black-Litterman versions consistently outperformed the benchmark. The gross version achieved the highest returns, illustrating the full potential of the strategy in the absence of trading costs. Even after accounting for costs, the net version still delivered better performance than the benchmark, demonstrating the strategy's practical effectiveness. The return gap becomes particularly noticeable during and after the COVID-related market volatility around 2020, highlighting the model’s ability to adapt during periods of uncertainty.
+        </p>
+        <img src="3_year_annualized_returns.png" alt="Rolling 3-Year Returns">
+        <p>
+            Throughout the period, the Black-Litterman strategies had a lot up and down compared to the benchmark. Before 2018 was outperformed the benchmark and after 2020 until 2023 was underperformed.This was likely because tech and a few other sectors performed very well, and the benchmark had more exposure to them.We experimented with increasing sector limits, especially for tech and other COVID-resilient sectors, but the results did not significantly improve. As a result, we chose to maintain broader diversification to manage risk.The effect of transaction costs was minimal, as the gross and net versions of the strategy showed very similar results. 
+        </p>
+        <img src="rolling_1_year_sharpe_ratio.png" alt="Rolling 1-Year Sharpe Ratio">
+            The Sharpe Ratio measures how much return a portfolio earns for each unit of risk taken and higher values mean better risk-adjusted performance. Throughout the period, the Black-Litterman strategies (both gross and net) generally achieved higher or comparable Sharpe Ratios compared to the benchmark. In several periods  especially around 2017, 2018, and again between 2020 and 2022  the strategy delivered significantly stronger risk-adjusted returns.
+        <img src="rolling_1_year_volatility.png" alt="Rolling 1-Year Volatility">
+            Throughout the entire period, the Black-Litterman strategies consistently had lower volatility than the benchmark. The Black-Litterman strategies in particular remained the most stable, even during high-stress periods like 2020 and 2022. This indicates that the strategy effectively controls risk, likely due to constraints on sector exposure, position limits, and other diversification rules.This lower volatility supports the higher Sharpe Ratios observed and helps explain the smoother drawdown behavior we will see in later charts.
+        <img src="drawdowns.png" alt="Max Drawdowns">
+            The benchmark experienced the deepest and most frequent drawdowns, especially during market stress periods like early 2020 (the COVID crash) and 2022. In contrast, the bl_gross and bl_net strategies generally had slightly shallower drawdowns, reflecting better downside control. While the speed of recovery was broadly similar, the Black-Litterman approach appeared more resilient during sharp market declines.
+        <img src="cumulative_return_during_bull_markets.png" alt="Cumulative Return During Bull Markets">
+            This chart shows how each portfolio performed during bull market periods times when the market was rising. During these periods, the benchmark (bm) slightly outperformed the Black-Litterman strategies, from 2021 onward. This is likely because the Black-Litterman approach includes constraints that limit overexposure to high-flying sectors helping manage risk but also slightly capping upside in strong rallies, showing that the model doesn't sacrifice too much return even while maintaining stricter risk control.
+        <img src="cumulative_return_during_bear_markets.png" alt="Cumulative Return During Bear Markets">
+            This chart shows how each portfolio performed during bear market periods times when the market was falling. In these environments, the Black-Litterman strategies clearly outperformed the benchmark, showing significantly smaller losses. Both bl_gross and bl_net strategies were much more resilient. Their losses were more limited and recovery was quicker, even after accounting for transaction costs in the net version.This highlights the strength of the Black-Litterman approach during downturns. The strategy's use of constraints, diversification, and risk control helped reduce downside exposure, making it a more defensive and stable option in falling markets.
+        <img src="turnover.png" alt="Turnover">
+            The high turnover at the beginning of 2015 reflects the first portfolio rebalance. After that, turnover remained low and stable, with occasional spikes, especially around early 2020, likely due to market stress. Overall, trading activity was moderate and controlled.
+        <h3>Descriptive Statistics</h3>
+       <div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" cellpadding="8">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>bm</th>
+      <th>bl_gross</th>
+      <th>bl_net</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>Annual Return</th>
+      <td>0.056569</td>
+      <td>0.066136</td>
+      <td>0.062805</td>
+    </tr>
+    <tr>
+      <th>Cumulative Return</th>
+      <td>0.701100</td>
+      <td>0.855774</td>
+      <td>0.800544</td>
+    </tr>
+    <tr>
+      <th>Annual Volatility</th>
+      <td>0.145660</td>
+      <td>0.121740</td>
+      <td>0.121735</td>
+    </tr>
+    <tr>
+      <th>Sharpe Ratio</th>
+      <td>0.451055</td>
+      <td>0.587317</td>
+      <td>0.561624</td>
+    </tr>
+    <tr>
+      <th>Max Drawdown</th>
+      <td>-0.263289</td>
+      <td>-0.260692</td>
+      <td>-0.260854</td>
+    </tr>
+    <tr>
+      <th>Tracking Error</th>
+      <td>0.000000</td>
+      <td>0.059177</td>
+      <td>0.059208</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+        <p>
+            The descriptive statistics highlight the strengths of the Black-Litterman strategy compared to the benchmark. Both the gross and net versions achieved higher annual and cumulative returns than the benchmark.Importantly, this was accomplished with lower annual volatility, meaning the strategy was less risky on a day-to-day basis.The Sharpe Ratio, which measures risk-adjusted return, was also significantly higher for the Black-Litterman strategies, confirming that they offered better returns for each unit of risk taken. Maximum drawdowns were slightly smaller than the benchmark, reflecting better downside protection during market downturns.The tracking error shows that while the strategy deviates moderately from the benchmark, it does so in a controlled way that adds value. The net performance, after accounting for transaction costs, remains strong demonstrating that the strategy is both effective and implementable in practice.
+        </p>
+
+        <p>
+            Overall, the Black-Litterman strategy delivered stronger and more stable performance compared to the benchmark. It provided higher returns, lower risk, and better protection during market downturns. While it gave up a bit of upside in strong bull markets due to its risk controls, it still captured most of the gains while avoiding the worst losses. Even after including trading costs, the net results remained solid. These findings show that the strategy offers a good balance between return and risk, making it a practical and reliable approach for long-term investing.
+        </p>
+    </div>
+
+    <div class="section">
+    <h2>Data Sources</h2>
+    <p>
+        The financial data used in this report was obtained from 
+        <strong>Wharton Research Data Services (WRDS)</strong>, including the 
+        <strong>CRSP US Stock Database</strong> and <strong>Compustat Global</strong>.
+    </p>
+    <ul>
+        <li><strong>CRSP US Stock Database:</strong> End-of-day and month-end prices for NYSE, Amex, and NASDAQ-listed common stocks. Includes total return calculations. Data goes back to 1926.</li>
+        <li><strong>Compustat Global:</strong> Fundamentals, pricing, and index data for 99,000+ global securities, covering 99% of global market capitalization. Market data from 1950; fundamentals from 1986.</li>
+    </ul>
+    <p>
+        Data access was performed via the <strong>WRDS Python API</strong>. For more information, visit 
+        <a href="https://wrds-www.wharton.upenn.edu" target="_blank">
+            https://wrds-www.wharton.upenn.edu
+        </a>.
+    </p>
+</div>
+
+
+</body>
+</html>
